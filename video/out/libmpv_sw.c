@@ -1,13 +1,19 @@
+// Modified by zeroPL contributors on 2026-09-29: add the versioned P010 target.
 #include "mpv/render_gl.h"
 #include "libmpv.h"
 #include "sub/osd.h"
 #include "video/sws_utils.h"
+#include "sub/draw_bmp.h"
+#include "PoCHDRComposite.h"
+#include <limits.h>
 
 struct priv {
     struct libmpv_gpu_context *context;
 
     struct mp_sws_context *sws;
     struct osd_state *osd;
+    struct mp_draw_sub_cache *poc_subs;
+    PoCHDRLUT *poc_lut;
 
     struct mp_image_params src_params, dst_params;
     struct mp_rect src_rc, dst_rc;
@@ -93,6 +99,8 @@ static int get_target_size(struct render_backend *ctx, mpv_render_param *params,
     return 0;
 }
 
+#include "PoCRender.inc"
+
 static int render(struct render_backend *ctx, mpv_render_param *params,
                   struct vo_frame *frame)
 {
@@ -105,6 +113,8 @@ static int render(struct render_backend *ctx, mpv_render_param *params,
 
     if (!sz || !fmt || !stride || !ptr)
         return MPV_ERROR_INVALID_PARAMETER;
+
+    if (strcmp(fmt, "poc-p010") == 0) return poc_render(ctx, sz, ptr, frame);
 
     char *prev_fmt = mp_imgfmt_to_name(p->dst_params.imgfmt);
     if (strcmp(prev_fmt, fmt) != 0)
