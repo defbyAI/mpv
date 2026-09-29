@@ -1,3 +1,4 @@
+// Modified by zeroPL contributors on 2026-09-29: use each backend's capabilities.
 #include <assert.h>
 #include <limits.h>
 #include <math.h>
@@ -55,6 +56,7 @@
 
 struct vo_priv {
     struct mpv_render_context *ctx; // immutable after init
+    struct vo_driver driver;
 };
 
 struct mpv_render_context {
@@ -728,6 +730,12 @@ static int preinit(struct vo *vo)
             MP_FATAL(vo, "No render context set.\n");
         return -1;
     }
+
+    // Software output requires automatic rotation/flip filters; GPU output
+    // performs these operations itself. Keep capabilities local to this VO.
+    p->driver = *vo->driver;
+    p->driver.caps = ctx->renderer->driver_caps;
+    vo->driver = &p->driver;
 
     mp_mutex_lock(&ctx->lock);
     ctx->vo = vo;

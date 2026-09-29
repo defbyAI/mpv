@@ -8,6 +8,10 @@ This branch starts at upstream `v0.41.0`, commit
 2. Add the opt-in `poc-p010` software render target, declared in
    `include/mpv/zeropl_p010.h`. It produces limited-range 10-bit YUV and composites
    libass graphics in linear light for PQ and HLG, with explicit subtitle white.
+3. Use the selected render backend's capabilities for each libmpv video output.
+   Software output now inserts mpv's automatic rotation and flip filters, while
+   GPU output retains its own rotation/flip support. This prevents incorrect
+   orientation and out-of-bounds crops for rotated software-rendered video.
 
 Existing render targets retain their behavior. Applications must request the new
 target explicitly. This extension is specific to this fork; upstream libmpv does
@@ -40,6 +44,18 @@ cc -std=c11 -O2 -Wall -Wextra -Werror -I. -Iinclude \
   test/zeropl_hdr.c -lm -o /tmp/zeropl-hdr-test
 /tmp/zeropl-hdr-test
 ```
+
+The software-render rotation regression uses a temporary synthetic grayscale
+image. Link it with the built shared library and run it without a display:
+
+```sh
+cc -std=c11 -O2 -Wall -Wextra -Werror -Iinclude test/zeropl_rotation.c \\
+  -Lbuild -lmpv -Wl,-rpath,"$PWD/build" -o /tmp/zeropl-rotation-test
+/tmp/zeropl-rotation-test
+```
+
+It checks 0/90/180/270-degree orientation in both RGB and P010 output. The build
+must retain FFmpeg's `rotate` filter, as zeroPL's LGPL recipes do.
 
 ## Licensing and source delivery
 
