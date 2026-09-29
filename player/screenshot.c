@@ -1,3 +1,4 @@
+// Modified by zeroPL contributors on 2026-09-29: correct hardware-frame detection.
 /*
  * This file is part of mpv.
  *
@@ -377,7 +378,7 @@ static struct mp_image *screenshot_get(struct MPContext *mpctx, int mode,
     }
 
     // vo_get_current_frame() can return a hardware frame, which we have to download first.
-    if (image && image->fmt.flags & MP_IMGFLAG_HWACCEL) {
+    if (image && IMGFMT_IS_HWACCEL(image->imgfmt)) {
         struct mp_image *nimage = mp_image_hw_download(image, NULL);
         talloc_free(image);
         if (!nimage)
