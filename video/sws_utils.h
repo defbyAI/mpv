@@ -1,4 +1,5 @@
 #ifndef MPLAYER_SWS_UTILS_H
+// Modified by zeroPL on 2026-10-01: internal worker policy and owned frame views.
 #define MPLAYER_SWS_UTILS_H
 
 #include <stdbool.h>
@@ -34,6 +35,10 @@ struct mp_sws_context {
     int flags;
     bool allow_zimg; // use zimg if available (ignores filters and all)
     bool force_reload;
+    // zeroPL: only the main software video scaler opts into bounded workers.
+    int threads;
+    int active_threads;
+    bool trace;
     // These are also implicitly set by mp_sws_scale(), and thus optional.
     // Setting them before that call makes sense when using mp_sws_reinit().
     struct mp_image_params src, dst;
@@ -61,6 +66,8 @@ struct mp_sws_context {
     struct mp_zimg_context *zimg;
     bool zimg_ok;
     struct mp_image *aligned_src, *aligned_dst;
+    struct AVFrame *scale_source, *scale_destination;
+    uint64_t scale_frames, scale_fallbacks, alignment_copies, scale_nanoseconds;
 };
 
 struct mp_sws_context *mp_sws_alloc(void *talloc_ctx);

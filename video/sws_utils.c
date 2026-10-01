@@ -16,6 +16,7 @@
  */
 
 #include <assert.h>
+// Modified by zeroPL on 2026-10-01: bounded synchronous threaded frame scaling.
 
 #include <libswscale/swscale.h>
 #include <libavcodec/avcodec.h>
@@ -37,6 +38,8 @@
 #include "csputils.h"
 #include "common/msg.h"
 #include "osdep/endian.h"
+#include "osdep/timer.h"
+#include "zeropl_swscale.h"
 
 #if HAVE_ZIMG
 #include "zimg.h"
@@ -172,12 +175,20 @@ static bool cache_valid(struct mp_sws_context *ctx)
            ctx->flags == old->flags &&
            ctx->allow_zimg == old->allow_zimg &&
            ctx->force_scaler == old->force_scaler &&
+           ctx->threads == old->threads &&
            (!ctx->opts_cache || !m_config_cache_update(ctx->opts_cache));
 }
 
 static void free_mp_sws(void *p)
 {
     struct mp_sws_context *ctx = p;
+    if (ctx->trace)
+        MP_INFO(ctx, "zeroPL scale summary: frames=%"PRIu64" fallbacks=%"PRIu64
+                " alignment-copies=%"PRIu64" milliseconds=%.3f workers=%d\n",
+                ctx->scale_frames, ctx->scale_fallbacks, ctx->alignment_copies,
+                ctx->scale_nanoseconds / 1e6, ctx->threads);
+    av_frame_free(&ctx->scale_source);
+    av_frame_free(&ctx->scale_destination);
     sws_freeContext(ctx->sws);
     sws_freeFilter(ctx->src_filter);
     sws_freeFilter(ctx->dst_filter);
@@ -194,6 +205,7 @@ struct mp_sws_context *mp_sws_alloc(void *talloc_ctx)
         .log = mp_null_log,
         .flags = SWS_BILINEAR,
         .force_reload = true,
+        .threads = 1,
         .params = {SWS_PARAM_DEFAULT, SWS_PARAM_DEFAULT},
         .cached = talloc_zero(ctx, struct mp_sws_context),
     };
@@ -295,6 +307,12 @@ int mp_sws_reinit(struct mp_sws_context *ctx)
     int d_range = dst.repr.levels == PL_COLOR_LEVELS_FULL;
 
     av_opt_set_int(ctx->sws, "sws_flags", ctx->flags, 0);
+    int workers = ctx->threads == 2 || ctx->threads == 4 ? ctx->threads : 1;
+    if ((int64_t)src.w * src.h < 1920 * 1080 &&
+        (int64_t)dst.w * dst.h < 1920 * 1080)
+        workers = 1;
+    av_opt_set_int(ctx->sws, "threads", workers, 0);
+    ctx->active_threads = workers;
 
     av_opt_set_int(ctx->sws, "srcw", src.w, 0);
     av_opt_set_int(ctx->sws, "srch", src.h, 0);
@@ -329,6 +347,13 @@ int mp_sws_reinit(struct mp_sws_context *ctx)
 
     if (sws_init_context(ctx->sws, ctx->src_filter, ctx->dst_filter) < 0)
         return -1;
+    // Modified by zeroPL on 2026-10-01: propagate coefficients to slice workers.
+    if (workers > 1) {
+        r = sws_setColorspaceDetails(ctx->sws, sws_getCoefficients(s_csp), s_range,
+                                    sws_getCoefficients(d_csp), d_range,
+                                    0, 1 << 16, 1 << 16);
+        ctx->supports_csp = r >= 0;
+    }
 
 #if HAVE_ZIMG
 success:
@@ -414,9 +439,31 @@ int mp_sws_scale(struct mp_sws_context *ctx, struct mp_image *dst,
 
     if (a_src != src)
         mp_image_copy(a_src, src);
-
-    sws_scale(ctx->sws, (const uint8_t *const *) a_src->planes, a_src->stride,
-              0, a_src->h, a_dst->planes, a_dst->stride);
+    ctx->alignment_copies += (a_src != src) + (a_dst != dst);
+    int64_t started = ctx->trace ? mp_time_ns() : 0;
+    int scaled = -1;
+    if (ctx->active_threads > 1) {
+        if (!ctx->scale_source)
+            ctx->scale_source = av_frame_alloc();
+        if (!ctx->scale_destination)
+            ctx->scale_destination = av_frame_alloc();
+        if (ctx->scale_source && ctx->scale_destination)
+            scaled = zeropl_scale_borrowed(ctx->sws, ctx->scale_source,
+                ctx->scale_destination, imgfmt2pixfmt(a_src->imgfmt),
+                a_src->w, a_src->h, a_src->planes, a_src->stride,
+                imgfmt2pixfmt(a_dst->imgfmt), a_dst->w, a_dst->h,
+                a_dst->planes, a_dst->stride);
+        if (scaled < 0)
+            ctx->scale_fallbacks++;
+    }
+    if (scaled < 0)
+        scaled = sws_scale(ctx->sws, (const uint8_t *const *) a_src->planes,
+                           a_src->stride, 0, a_src->h, a_dst->planes, a_dst->stride);
+    ctx->scale_frames++;
+    if (ctx->trace)
+        ctx->scale_nanoseconds += mp_time_ns() - started;
+    if (scaled != a_dst->h)
+        return -1;
 
     if (a_dst != dst)
         mp_image_copy(dst, a_dst);

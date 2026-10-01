@@ -34,7 +34,14 @@ static int init(struct render_backend *ctx, mpv_render_param *params)
         return MPV_ERROR_NOT_IMPLEMENTED;
 
     p->sws = mp_sws_alloc(p);
+    p->sws->log = ctx->log;
     mp_sws_enable_cmdline_opts(p->sws, ctx->global);
+    // Modified by zeroPL on 2026-10-01: diagnostic override, baseline by default.
+    const char *workers = getenv("ZEROPL_SW_SCALE_THREADS");
+    if (workers && (!strcmp(workers, "2") || !strcmp(workers, "4")))
+        p->sws->threads = atoi(workers);
+    p->sws->trace = getenv("ZEROPL_SW_SCALE_TRACE") &&
+        !strcmp(getenv("ZEROPL_SW_SCALE_TRACE"), "1");
 
     p->anything_changed = true;
 

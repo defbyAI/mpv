@@ -12,6 +12,15 @@ This branch starts at upstream `v0.41.0`, commit
    Software output now inserts mpv's automatic rotation and flip filters, while
    GPU output retains its own rotation/flip support. This prevents incorrect
    orientation and out-of-bounds crops for rotated software-rendered video.
+4. Add bounded, opt-in parallel scaling for the main software video conversion.
+   `ZEROPL_SW_SCALE_THREADS=2` or `4` selects the candidate at renderer creation;
+   absent/invalid values and `1` retain the legacy baseline. Only conversions
+   with a source or destination area of at least 1920 by 1080 use workers.
+   Subtitle helper scalers remain unchanged. Explicit initialized swscale
+   configuration, colorspace propagation, synchronous read-only source views,
+   caller-owned destination views, and legacy fallback preserve output.
+   `ZEROPL_SW_SCALE_TRACE=1` emits bounded scale summaries when the scaler is
+   destroyed. This measures scale calls, not decode, scheduling, or display.
 
 Existing render targets retain their behavior. Applications must request the new
 target explicitly. This extension is specific to this fork; upstream libmpv does
@@ -44,6 +53,22 @@ cc -std=c11 -O2 -Wall -Wextra -Werror -I. -Iinclude \
   test/zeropl_hdr.c -lm -o /tmp/zeropl-hdr-test
 /tmp/zeropl-hdr-test
 ```
+
+The standalone borrowed-plane scaler test needs the same FFmpeg headers and
+libraries used by the build. It compares two/four workers against legacy output
+for synthetic 8/10/12-bit, RGB/YUV, range, matrix, stride, and repeated-frame
+cases, and is also registered with Meson when `-Dtests=true`:
+
+```sh
+cc -std=c11 -O2 -Wall -Wextra -Werror -I. test/zeropl_swscale.c \
+  $(pkg-config --cflags --libs libavutil libswscale) -o /tmp/zeropl-swscale-test
+/tmp/zeropl-swscale-test
+meson test -C build zeropl-swscale --print-errorlogs
+```
+
+Physical-device quality, background PiP, sustained power, and thermal checks are
+required before a distributor makes the worker candidate its default. The fork
+defaults to one worker and does not change the version-1 P010 interface.
 
 The software-render rotation regression uses a temporary synthetic grayscale
 image. Link it with the built shared library and run it without a display:

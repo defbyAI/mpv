@@ -3,6 +3,11 @@ incdir = include_directories('../')
 outdir = join_paths(build_root, 'test', 'out')
 refdir = ''
 
+zeropl_swscale = executable('zeropl-swscale', 'zeropl_swscale.c',
+                           include_directories: incdir,
+                           dependencies: [libavutil, libswscale])
+test('zeropl-swscale', zeropl_swscale, suite: 'ffmpeg')
+
 # Convenient testing libraries. An adhoc collection of
 # mpv objects that test_utils.c needs. Stuff will probably
 # break if core things are carelessly moved around.
